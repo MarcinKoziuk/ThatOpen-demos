@@ -20,6 +20,20 @@ export const modelsPanelTemplate: BUI.StatefullComponent<ModelsPanelState> = (
     actions: { download: false },
   });
 
+  async function printInfo() {
+    for (const model of fragments.list.values()) {
+      const categories = await model.getCategories()
+      const relationNames = await model.getRelationNames()
+      const attributeTypes = await model.getAttributeTypes()
+      console.log("model categories, relationNames, attributeTypes", {
+        model,
+        categories,
+        relationNames,
+        attributeTypes,
+      })
+    }
+  }
+
   const onAddIfcModel = async ({ target }: { target: BUI.Button }) => {
     const input = document.createElement("input");
     input.type = "file";
@@ -35,6 +49,8 @@ export const modelsPanelTemplate: BUI.StatefullComponent<ModelsPanelState> = (
       await ifcLoader.load(bytes, true, file.name.replace(".ifc", ""));
       target.loading = false;
       BUI.ContextMenu.removeMenus();
+
+      await printInfo()
     });
 
     input.addEventListener("cancel", () => (target.loading = false));
@@ -59,6 +75,8 @@ export const modelsPanelTemplate: BUI.StatefullComponent<ModelsPanelState> = (
       });
       target.loading = false;
       BUI.ContextMenu.removeMenus();
+
+      await printInfo()
     });
 
     input.addEventListener("cancel", () => (target.loading = false));
