@@ -4,6 +4,7 @@ import * as OBF from "@thatopen/components-front";
 import * as FRAGS from "@thatopen/fragments";
 import * as THREE from "three";
 import { appIcons, tooltips } from "../../globals";
+import { BoxSelectionManager } from "../../bim-components/BoxSelection"
 
 export interface ViewerToolbarState {
   components: OBC.Components;
@@ -69,6 +70,8 @@ export const viewerToolbarTemplate: BUI.StatefullComponent<
 
   const highlighter = components.get(OBF.Highlighter);
   const hider = components.get(OBC.Hider);
+  const fragments = components.get(OBC.FragmentsManager);
+  const boxSelectionManager = components.get(BoxSelectionManager)
 
   const onToggleGhost = () => {
     if (originalColors.size) {
@@ -124,35 +127,43 @@ export const viewerToolbarTemplate: BUI.StatefullComponent<
     return input.color;
   };
 
-  const onApplyColor = async ({ target }: { target: BUI.Button }) => {
+  const applyColor = async (target: BUI.Button, all: boolean) => {
     const colorValue = getColorValue();
-    const selection = highlighter.selection.select;
+    const selection = all
+      ? await getAllItemsModelMap(fragments)
+      : highlighter.selection.select;
     if (OBC.ModelIdMapUtils.isEmpty(selection) || !colorValue) return;
     const color = new THREE.Color(colorValue);
-    const style = [...highlighter.styles.entries()].find(([, definition]) => {
-      if (!definition) return false;
-      return definition.color.getHex() === color.getHex();
-    });
+
     target.loading = true;
-    if (style) {
-      const name = style[0];
-      if (name === "select") {
-        target.loading = false;
-        return;
-      }
-      await highlighter.highlightByID(name, selection, false, false);
-    } else {
-      highlighter.styles.set(colorValue, {
-        color,
-        renderedFaces: FRAGS.RenderedFaces.ONE,
-        opacity: 1,
-        transparent: false,
-      });
-      await highlighter.highlightByID(colorValue, selection, false, false);
-    }
+    highlighter.styles.set(colorValue, {
+      color,
+      renderedFaces: FRAGS.RenderedFaces.ONE,
+      opacity: 1,
+      transparent: false,
+    });
+    await highlighter.highlightByID(colorValue, selection, false, false);
+
     await highlighter.clear("select");
     target.loading = false;
   };
+  const onApplyColor = ({ all }: { all?: boolean } = {}) =>
+    async ({ target }: { target: BUI.Button }) => {
+      await applyColor(target, all ?? false);
+    }
+
+  const onBoxSelect = async (event: PointerEvent) => {
+    const el = event.currentTarget as HTMLElement
+    const isActive = el.hasAttribute('active')
+    if (isActive) {
+      boxSelectionManager.cancelBoxSelection()
+      el.removeAttribute('active')
+    } else {
+      el.setAttribute('active', '')
+      await boxSelectionManager.startBoxSelection(world)
+      el.removeAttribute('active')
+    }
+  }
 
   return BUI.html`
     <bim-toolbar>
@@ -164,11 +175,18 @@ export const viewerToolbarTemplate: BUI.StatefullComponent<
         ${focusBtn}
         <bim-button tooltip-title=${tooltips.HIDE.TITLE} tooltip-text=${tooltips.HIDE.TEXT} icon=${appIcons.HIDE} label="Hide" @click=${onHide}></bim-button> 
         <bim-button tooltip-title=${tooltips.ISOLATE.TITLE} tooltip-text=${tooltips.ISOLATE.TEXT} icon=${appIcons.ISOLATE} label="Isolate" @click=${onIsolate}></bim-button>
+        <bim-button
+            tooltip-title="Box select"
+            tooltip-text="Drag a rectangle to select multiple items. Left-to-right selects fully enclosed items, right-to-left includes touched items. Hold SHIFT and drag anytime."
+            icon="mdi:select"
+            label="Box select"
+            @click=${onBoxSelect}></bim-button>
         <bim-button icon=${appIcons.COLORIZE} label="Colorize">
           <bim-context-menu>
-            <div style="display: flex; gap: 0.5rem; width: 10rem;">
-              <bim-color-input id=${colorInputId}></bim-color-input>
-              <bim-button label="Apply" @click=${onApplyColor}></bim-button>
+            <div style="display: flex; gap: 0.5rem; width: 14rem;">
+              <bim-color-input id=${colorInputId} color="#bb33ff"></bim-color-input>
+              <bim-button label="Apply" @click=${onApplyColor()}></bim-button>
+              <bim-button label="Apply to all" @click=${onApplyColor({ all: true })}></bim-button>
             </div>
           </bim-context-menu>
         </bim-button>
@@ -176,3 +194,11 @@ export const viewerToolbarTemplate: BUI.StatefullComponent<
     </bim-toolbar>
   `;
 };
+
+async function getAllItemsModelMap(fragments: OBC.FragmentsManager) {
+  const map: OBC.ModelIdMap = {}
+  await Promise.all([ ...fragments.core.models.list.values() ].map(async model => {
+    map[model.modelId] = new Set(await model.getItemsIds())
+  }))
+  return map
+}
